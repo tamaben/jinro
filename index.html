@@ -2,82 +2,137 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Joy-Con人狼</title>
+<title>Joy-Con 人狼</title>
+
 <style>
 body{
   background:#111;
   color:white;
-  text-align:center;
   font-family:sans-serif;
+  text-align:center;
+}
+
+.player{
+  display:inline-block;
+  padding:20px;
+  margin:15px;
+  border-radius:20px;
+  cursor:pointer;
+  min-width:140px;
+}
+
+input{
+  width:100px;
 }
 button{
-  font-size:24px;
-  padding:20px;
-  margin:20px;
+  padding:10px 20px;
+  font-size:18px;
+  margin:10px;
 }
 </style>
 </head>
 
 <body>
 
-<h1>🐺 人狼ゲーム</h1>
+<h1>🐺 Joy-Con 人狼</h1>
 
-<button onclick="connectJoy()">🎮 Joy-Con接続</button>
-<button onclick="giveRole()">🎲 役職配布</button>
+<button onclick="connect()">🎮 Joy-Con接続</button>
+<button onclick="startRoles()">🎲 役職配布</button>
 
-<p id="msg">接続してください</p>
+<div id="players"></div>
 
 <script>
 
-let device = null
+let joycons = []
 
-// ===== Joy-Con接続（WebHID） =====
-async function connectJoy(){
 
-  device = await navigator.hid.requestDevice({
-    filters:[{vendorId:0x057e}] // Nintendo
+// ===== 接続 =====
+async function connect(){
+
+  const devices = await navigator.hid.requestDevice({
+    filters:[{vendorId:0x057e}]
   })
 
-  device = device[0]
-  await device.open()
+  for(const d of devices){
 
-  msg.innerText = "接続完了！"
+    await d.open()
+
+    const color = getColor(d.productId)
+
+    joycons.push({
+      device:d,
+      name:"Player",
+      color:color
+    })
+  }
+
+  render()
 }
 
 
-// ===== 1回振動 =====
-async function rumble(){
+// ===== 色推定 =====
+function getColor(pid){
+  if(pid === 0x2006) return "#00aaff" // L 青
+  if(pid === 0x2007) return "#ff4444" // R 赤
+  return "#888"
+}
 
-  if(!device) return
 
+// ===== 表示 =====
+function render(){
+
+  players.innerHTML=""
+
+  joycons.forEach((j,i)=>{
+
+    const div = document.createElement("div")
+    div.className="player"
+    div.style.background=j.color
+
+    div.innerHTML=`
+      <input value="${j.name}"
+             onchange="joycons[${i}].name=this.value">
+      <br><small>タップで振動確認</small>
+    `
+
+    div.onclick=()=> vibrate(j.device,1)
+
+    players.appendChild(div)
+  })
+}
+
+
+// ===== 超弱一瞬振動 =====
+async function vibrate(device,times){
+
+  // かなり弱めパケット
   const data = new Uint8Array([
-    0x10,0x01,0x40,0x40,0x00,0x01,0x40,0x40
+    0x10,0x01,0x10,0x10,0x00,0x01,0x10,0x10
   ])
 
-  await device.sendReport(0x10, data)
-}
-
-
-// ===== 複数回振動 =====
-async function vibrate(times){
-
   for(let i=0;i<times;i++){
-    await rumble()
-    await new Promise(r=>setTimeout(r,250))
+    await device.sendReport(0x10,data)
+    await new Promise(r=>setTimeout(r,120))
   }
 }
 
 
 // ===== 役職配布 =====
-function giveRole(){
+async function startRoles(){
 
-  const role = Math.floor(Math.random()*5)+1
+  const roles = [1,2,3,4,5]
 
-  vibrate(role)
+  for(const j of joycons){
 
-  msg.innerText = "振動回数で確認！"
+    const r = roles[Math.floor(Math.random()*roles.length)]
+
+    await vibrate(j.device,r)
+  }
+
+  alert("振動回数で役職を確認してください")
 }
 
 </script>
+
 </body>
 </html>

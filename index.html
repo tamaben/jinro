@@ -2,8 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Joy-Con 人狼</title>
-
+<title>Joy-Con 人狼 完全版</title>
 <style>
 body{
   background:#111;
@@ -11,26 +10,14 @@ body{
   font-family:sans-serif;
   text-align:center;
 }
-
 .player{
   display:inline-block;
   padding:18px;
-  margin:12px;
-  border-radius:18px;
+  margin:10px;
+  border-radius:16px;
   min-width:140px;
-  cursor:pointer;
 }
-
-input{
-  width:100px;
-  text-align:center;
-}
-
-button{
-  padding:10px 18px;
-  font-size:18px;
-  margin:8px;
-}
+button{padding:10px 20px;font-size:18px;margin:6px;}
 </style>
 </head>
 
@@ -41,100 +28,89 @@ button{
 <button onclick="connect()">🎮 接続</button>
 <button onclick="distribute()">🎲 役職配布</button>
 
-<h3 id="rule">
-【役職】<br>
-1回:人狼　2回:村人　3回:占い師　4回:騎士　5回:狂人<br>
-Aボタン: 決定　Rボタン: 再確認
-</h3>
+<h3 id="phase">接続してください</h3>
 
 <div id="players"></div>
-<p id="msg">Joy-Conを接続してください</p>
 
 <script>
 
-let joycons=[]
+let players=[]
+let phase="setup"
 let confirmed=0
+let votes={}
 
-
-// =======================
+// =================
 // 接続
-// =======================
+// =================
 
 async function connect(){
 
-  const devices = await navigator.hid.requestDevice({
+  const devices=await navigator.hid.requestDevice({
     filters:[{vendorId:0x057e}]
   })
 
   for(const d of devices){
-
     await d.open()
 
-    const jc={
+    const p={
       device:d,
       name:"Player",
       role:0,
+      alive:true,
       confirmed:false,
-      color:getColor(d.productId)
+      color:getColor(d.productId),
+      side:(d.productId===0x2006?"L":"R")
     }
 
-    joycons.push(jc)
+    players.push(p)
 
-    d.addEventListener("inputreport",e=>handleInput(e,jc))
+    d.addEventListener("inputreport",e=>handleInput(e,p))
   }
 
   render()
-  msg.innerText="名前入力 → 役職配布"
+  phaseText("名前入力 → 役職配布")
 }
 
-
-// =======================
-// 色判定
-// =======================
+// =================
+// 色
+// =================
 
 function getColor(pid){
-  if(pid===0x2006) return "#00aaff"
-  if(pid===0x2007) return "#ff4444"
-  return "#888"
+  return pid===0x2006 ? "#00aaff" : "#ff4444"
 }
 
-
-// =======================
-// 表示
-// =======================
+// =================
+// UI表示
+// =================
 
 function render(){
 
-  players.innerHTML=""
+  playersDiv.innerHTML=""
 
-  joycons.forEach((j,i)=>{
+  players.forEach((p,i)=>{
+    const d=document.createElement("div")
+    d.className="player"
+    d.style.background=p.color
 
-    const div=document.createElement("div")
-    div.className="player"
-    div.style.background=j.color
+    d.innerHTML=
+      `<input value="${p.name}"
+        onchange="players[${i}].name=this.value">
+       <br>${p.side} Joy-Con`
 
-    div.innerHTML=`
-      <input value="${j.name}"
-      onchange="joycons[${i}].name=this.value">
-      <br><small>タップで振動確認</small>
-    `
+    d.onclick=()=>vibrate(p.device,1)
 
-    div.onclick=()=>vibrate(j.device,1)
-
-    players.appendChild(div)
+    playersDiv.appendChild(d)
   })
 }
 
+const playersDiv=document.getElementById("players")
 
-// =======================
+// =================
 // 弱振動
-// =======================
+// =================
 
 async function vibrate(device,times){
-
-  const weak=new Uint8Array([
-    0x10,0x01,0x10,0x10,0x00,0x01,0x10,0x10
-  ])
+  const weak=new Uint8Array([0x10,0x01,0x10,0x10,0,1,0x10,0x10])
 
   for(let i=0;i<times;i++){
     await device.sendReport(0x10,weak)
@@ -142,74 +118,152 @@ async function vibrate(device,times){
   }
 }
 
-
-// =======================
+// =================
 // 役職配布
-// =======================
+// =================
 
 async function distribute(){
 
+  phase="role"
+
+  const roles=[1,2,2,2,3] // 人狼1 占1 他村人
+
+  players.forEach((p,i)=>{
+    p.role=roles[i%roles.length]
+    p.confirmed=false
+  })
+
   confirmed=0
 
-  for(const j of joycons){
-    j.role=Math.floor(Math.random()*5)+1
-    j.confirmed=false
-  }
+  phaseText("振動で確認 → A決定 / L再確認")
 
-  msg.innerText="振動で役職確認 → Aで決定 / Rで再確認"
-
-  for(const j of joycons){
-    await vibrate(j.device,j.role)
+  for(const p of players){
+    await vibrate(p.device,p.role)
   }
 }
 
+// =================
+// 入力
+// =================
 
-// =======================
-// ボタン入力
-// =======================
+async function handleInput(e,p){
 
-async function handleInput(e,j){
+  const d=new Uint8Array(e.data.buffer)
 
-  const d = new Uint8Array(e.data.buffer)
+  const A=(d[3]&0x08)!==0
+  const L=(d[3]&0x01)!==0
 
-  const A = (d[3] & 0x08) !== 0
-  const R = (d[3] & 0x40) !== 0
-
-  // R → 再確認
-  if(R){
-    await vibrate(j.device,j.role)
+  // 再確認（Lボタン）
+  if(L && phase==="role"){
+    await vibrate(p.device,p.role)
   }
 
-  // A → 決定
-  if(A && !j.confirmed){
-    j.confirmed=true
-    confirmed++
-    msg.innerText=`確認中… ${confirmed}/${joycons.length}`
+  // 決定（Aボタン）
+  if(A){
 
-    await vibrate(j.device,1)
+    if(phase==="role" && !p.confirmed){
+      p.confirmed=true
+      confirmed++
+      if(confirmed===players.length) startGame()
+    }
 
-    if(confirmed===joycons.length){
-      startGame()
+    if(phase==="vote" && p.alive){
+      vote(p)
     }
   }
 }
 
-
-// =======================
+// =================
 // ゲーム開始
-// =======================
+// =================
 
 async function startGame(){
+  phase="night"
+  phaseText("🌙 夜フェーズ（目を閉じる）")
 
-  msg.innerText="ゲーム開始！！！ 🐺"
+  for(const p of players){
+    if(p.role===1) await vibrate(p.device,3) // 人狼だけ追加通知
+  }
 
-  // 開始合図
-  for(const j of joycons){
-    await vibrate(j.device,2)
+  setTimeout(dayPhase,5000)
+}
+
+// =================
+// 昼フェーズ
+// =================
+
+function dayPhase(){
+  phase="vote"
+  votes={}
+  phaseText("☀️ 投票！ 処刑したい人のAを押す")
+}
+
+// =================
+// 投票
+// =================
+
+function vote(target){
+
+  votes[target.name]=(votes[target.name]||0)+1
+
+  if(Object.keys(votes).length>=players.filter(p=>p.alive).length){
+    execute()
   }
 }
 
-</script>
+// =================
+// 処刑
+// =================
 
+function execute(){
+
+  let max=0
+  let name=""
+
+  for(const k in votes){
+    if(votes[k]>max){
+      max=votes[k]
+      name=k
+    }
+  }
+
+  const p=players.find(x=>x.name===name)
+  p.alive=false
+
+  phaseText(`${name} が処刑された`)
+
+  setTimeout(checkWin,2000)
+}
+
+// =================
+// 勝敗
+// =================
+
+function checkWin(){
+
+  const wolves=players.filter(p=>p.role===1&&p.alive).length
+  const humans=players.filter(p=>p.role!==1&&p.alive).length
+
+  if(wolves===0){
+    phaseText("🎉 村人勝利！")
+    return
+  }
+  if(wolves>=humans){
+    phaseText("🐺 人狼勝利！")
+    return
+  }
+
+  dayPhase()
+}
+
+// =================
+// 表示
+// =================
+
+function phaseText(t){
+  document.getElementById("phase").innerText=t
+}
+
+</script>
 </body>
 </html>

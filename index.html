@@ -2,7 +2,8 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Joy-Con 人狼 完全版</title>
+<title>Joy-Con 人狼</title>
+
 <style>
 body{
   background:#111;
@@ -10,25 +11,31 @@ body{
   font-family:sans-serif;
   text-align:center;
 }
+
 .player{
   display:inline-block;
   padding:18px;
   margin:10px;
   border-radius:16px;
-  min-width:140px;
+  min-width:150px;
 }
-button{padding:10px 20px;font-size:18px;margin:6px;}
+
+button{
+  padding:10px 18px;
+  font-size:18px;
+  margin:6px;
+}
 </style>
 </head>
 
 <body>
 
-<h1>🐺 Joy-Con 人狼</h1>
+<h1>🐺 Joy-Con 人狼（1人1コントローラー）</h1>
 
 <button onclick="connect()">🎮 接続</button>
-<button onclick="distribute()">🎲 役職配布</button>
+<button onclick="assignRoles()">🎲 役職配布</button>
 
-<h3 id="phase">接続してください</h3>
+<h2 id="phase">接続してください</h2>
 
 <div id="players"></div>
 
@@ -36,7 +43,6 @@ button{padding:10px 20px;font-size:18px;margin:6px;}
 
 let players=[]
 let phase="setup"
-let confirmed=0
 let votes={}
 
 // =================
@@ -52,14 +58,15 @@ async function connect(){
   for(const d of devices){
     await d.open()
 
+    const side = d.productId===0x2006 ? "L" : "R"
+
     const p={
       device:d,
       name:"Player",
-      role:0,
+      role:"",
       alive:true,
-      confirmed:false,
-      color:getColor(d.productId),
-      side:(d.productId===0x2006?"L":"R")
+      side:side,
+      color:side==="L" ? "#00aaff" : "#ff4444"
     }
 
     players.push(p)
@@ -68,19 +75,11 @@ async function connect(){
   }
 
   render()
-  phaseText("名前入力 → 役職配布")
+  setPhase("名前入力 → 役職配布")
 }
 
 // =================
-// 色
-// =================
-
-function getColor(pid){
-  return pid===0x2006 ? "#00aaff" : "#ff4444"
-}
-
-// =================
-// UI表示
+// 表示
 // =================
 
 function render(){
@@ -88,18 +87,20 @@ function render(){
   playersDiv.innerHTML=""
 
   players.forEach((p,i)=>{
-    const d=document.createElement("div")
-    d.className="player"
-    d.style.background=p.color
 
-    d.innerHTML=
+    const div=document.createElement("div")
+    div.className="player"
+    div.style.background=p.color
+
+    div.innerHTML=
       `<input value="${p.name}"
-        onchange="players[${i}].name=this.value">
-       <br>${p.side} Joy-Con`
+       onchange="players[${i}].name=this.value">
+       <br>${p.side} Joy-Con
+       <br><b>${p.role}</b>`
 
-    d.onclick=()=>vibrate(p.device,1)
+    div.onclick=()=>vibrate(p.device,1)
 
-    playersDiv.appendChild(d)
+    playersDiv.appendChild(div)
   })
 }
 
@@ -119,31 +120,25 @@ async function vibrate(device,times){
 }
 
 // =================
-// 役職配布
+// 役職配布（表示あり）
 // =================
 
-async function distribute(){
+function assignRoles(){
 
-  phase="role"
-
-  const roles=[1,2,2,2,3] // 人狼1 占1 他村人
+  const roles=["人狼","占い師","村人","村人","村人"]
 
   players.forEach((p,i)=>{
     p.role=roles[i%roles.length]
-    p.confirmed=false
   })
 
-  confirmed=0
+  render()
 
-  phaseText("振動で確認 → A決定 / L再確認")
-
-  for(const p of players){
-    await vibrate(p.device,p.role)
-  }
+  setPhase("Aボタンでゲーム開始")
+  phase="ready"
 }
 
 // =================
-// 入力
+// 入力処理
 // =================
 
 async function handleInput(e,p){
@@ -151,20 +146,18 @@ async function handleInput(e,p){
   const d=new Uint8Array(e.data.buffer)
 
   const A=(d[3]&0x08)!==0
-  const L=(d[3]&0x01)!==0
+  const confirm=(d[3]&0x40)!==0 || (d[3]&0x01)!==0 // R or L
 
-  // 再確認（Lボタン）
-  if(L && phase==="role"){
-    await vibrate(p.device,p.role)
+  // 振動確認
+  if(confirm){
+    await vibrate(p.device,1)
   }
 
-  // 決定（Aボタン）
+  // 決定
   if(A){
 
-    if(phase==="role" && !p.confirmed){
-      p.confirmed=true
-      confirmed++
-      if(confirmed===players.length) startGame()
+    if(phase==="ready"){
+      startGame()
     }
 
     if(phase==="vote" && p.alive){
@@ -177,25 +170,10 @@ async function handleInput(e,p){
 // ゲーム開始
 // =================
 
-async function startGame(){
-  phase="night"
-  phaseText("🌙 夜フェーズ（目を閉じる）")
-
-  for(const p of players){
-    if(p.role===1) await vibrate(p.device,3) // 人狼だけ追加通知
-  }
-
-  setTimeout(dayPhase,5000)
-}
-
-// =================
-// 昼フェーズ
-// =================
-
-function dayPhase(){
+function startGame(){
   phase="vote"
   votes={}
-  phaseText("☀️ 投票！ 処刑したい人のAを押す")
+  setPhase("☀️ 投票フェーズ：処刑したい人のAを押す")
 }
 
 // =================
@@ -206,7 +184,9 @@ function vote(target){
 
   votes[target.name]=(votes[target.name]||0)+1
 
-  if(Object.keys(votes).length>=players.filter(p=>p.alive).length){
+  const alive=players.filter(p=>p.alive).length
+
+  if(Object.values(votes).reduce((a,b)=>a+b,0)>=alive){
     execute()
   }
 }
@@ -217,8 +197,7 @@ function vote(target){
 
 function execute(){
 
-  let max=0
-  let name=""
+  let max=0,name=""
 
   for(const k in votes){
     if(votes[k]>max){
@@ -230,9 +209,9 @@ function execute(){
   const p=players.find(x=>x.name===name)
   p.alive=false
 
-  phaseText(`${name} が処刑された`)
+  setPhase(name+" が処刑された")
 
-  setTimeout(checkWin,2000)
+  checkWin()
 }
 
 // =================
@@ -241,26 +220,29 @@ function execute(){
 
 function checkWin(){
 
-  const wolves=players.filter(p=>p.role===1&&p.alive).length
-  const humans=players.filter(p=>p.role!==1&&p.alive).length
+  const wolves=players.filter(p=>p.role==="人狼"&&p.alive).length
+  const humans=players.filter(p=>p.role!=="人狼"&&p.alive).length
 
   if(wolves===0){
-    phaseText("🎉 村人勝利！")
-    return
-  }
-  if(wolves>=humans){
-    phaseText("🐺 人狼勝利！")
+    setPhase("🎉 村人勝利！")
     return
   }
 
-  dayPhase()
+  if(wolves>=humans){
+    setPhase("🐺 人狼勝利！")
+    return
+  }
+
+  phase="vote"
+  votes={}
+  setPhase("次の投票へ")
 }
 
 // =================
 // 表示
 // =================
 
-function phaseText(t){
+function setPhase(t){
   document.getElementById("phase").innerText=t
 }
 

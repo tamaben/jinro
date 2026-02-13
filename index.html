@@ -14,20 +14,22 @@ body{
 
 .player{
   display:inline-block;
-  padding:20px;
-  margin:15px;
-  border-radius:20px;
-  cursor:pointer;
+  padding:18px;
+  margin:12px;
+  border-radius:18px;
   min-width:140px;
+  cursor:pointer;
 }
 
 input{
   width:100px;
+  text-align:center;
 }
+
 button{
-  padding:10px 20px;
+  padding:10px 18px;
   font-size:18px;
-  margin:10px;
+  margin:8px;
 }
 </style>
 </head>
@@ -36,17 +38,28 @@ button{
 
 <h1>🐺 Joy-Con 人狼</h1>
 
-<button onclick="connect()">🎮 Joy-Con接続</button>
-<button onclick="startRoles()">🎲 役職配布</button>
+<button onclick="connect()">🎮 接続</button>
+<button onclick="distribute()">🎲 役職配布</button>
+
+<h3 id="rule">
+【役職】<br>
+1回:人狼　2回:村人　3回:占い師　4回:騎士　5回:狂人<br>
+Aボタン: 決定　Rボタン: 再確認
+</h3>
 
 <div id="players"></div>
+<p id="msg">Joy-Conを接続してください</p>
 
 <script>
 
-let joycons = []
+let joycons=[]
+let confirmed=0
 
 
-// ===== 接続 =====
+// =======================
+// 接続
+// =======================
+
 async function connect(){
 
   const devices = await navigator.hid.requestDevice({
@@ -57,79 +70,143 @@ async function connect(){
 
     await d.open()
 
-    const color = getColor(d.productId)
-
-    joycons.push({
+    const jc={
       device:d,
       name:"Player",
-      color:color
-    })
+      role:0,
+      confirmed:false,
+      color:getColor(d.productId)
+    }
+
+    joycons.push(jc)
+
+    d.addEventListener("inputreport",e=>handleInput(e,jc))
   }
 
   render()
+  msg.innerText="名前入力 → 役職配布"
 }
 
 
-// ===== 色推定 =====
+// =======================
+// 色判定
+// =======================
+
 function getColor(pid){
-  if(pid === 0x2006) return "#00aaff" // L 青
-  if(pid === 0x2007) return "#ff4444" // R 赤
+  if(pid===0x2006) return "#00aaff"
+  if(pid===0x2007) return "#ff4444"
   return "#888"
 }
 
 
-// ===== 表示 =====
+// =======================
+// 表示
+// =======================
+
 function render(){
 
   players.innerHTML=""
 
   joycons.forEach((j,i)=>{
 
-    const div = document.createElement("div")
+    const div=document.createElement("div")
     div.className="player"
     div.style.background=j.color
 
     div.innerHTML=`
       <input value="${j.name}"
-             onchange="joycons[${i}].name=this.value">
+      onchange="joycons[${i}].name=this.value">
       <br><small>タップで振動確認</small>
     `
 
-    div.onclick=()=> vibrate(j.device,1)
+    div.onclick=()=>vibrate(j.device,1)
 
     players.appendChild(div)
   })
 }
 
 
-// ===== 超弱一瞬振動 =====
+// =======================
+// 弱振動
+// =======================
+
 async function vibrate(device,times){
 
-  // かなり弱めパケット
-  const data = new Uint8Array([
+  const weak=new Uint8Array([
     0x10,0x01,0x10,0x10,0x00,0x01,0x10,0x10
   ])
 
   for(let i=0;i<times;i++){
-    await device.sendReport(0x10,data)
+    await device.sendReport(0x10,weak)
     await new Promise(r=>setTimeout(r,120))
   }
 }
 
 
-// ===== 役職配布 =====
-async function startRoles(){
+// =======================
+// 役職配布
+// =======================
 
-  const roles = [1,2,3,4,5]
+async function distribute(){
+
+  confirmed=0
 
   for(const j of joycons){
-
-    const r = roles[Math.floor(Math.random()*roles.length)]
-
-    await vibrate(j.device,r)
+    j.role=Math.floor(Math.random()*5)+1
+    j.confirmed=false
   }
 
-  alert("振動回数で役職を確認してください")
+  msg.innerText="振動で役職確認 → Aで決定 / Rで再確認"
+
+  for(const j of joycons){
+    await vibrate(j.device,j.role)
+  }
+}
+
+
+// =======================
+// ボタン入力
+// =======================
+
+async function handleInput(e,j){
+
+  const d = new Uint8Array(e.data.buffer)
+
+  const A = (d[3] & 0x08) !== 0
+  const R = (d[3] & 0x40) !== 0
+
+  // R → 再確認
+  if(R){
+    await vibrate(j.device,j.role)
+  }
+
+  // A → 決定
+  if(A && !j.confirmed){
+    j.confirmed=true
+    confirmed++
+    msg.innerText=`確認中… ${confirmed}/${joycons.length}`
+
+    await vibrate(j.device,1)
+
+    if(confirmed===joycons.length){
+      startGame()
+    }
+  }
+}
+
+
+// =======================
+// ゲーム開始
+// =======================
+
+async function startGame(){
+
+  msg.innerText="ゲーム開始！！！ 🐺"
+
+  // 開始合図
+  for(const j of joycons){
+    await vibrate(j.device,2)
+  }
 }
 
 </script>

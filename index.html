@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Joy-Con人狼</title>
+<style>
+body{
+  background:#111;
+  color:white;
+  text-align:center;
+  font-family:sans-serif;
+}
+button{
+  font-size:24px;
+  padding:20px;
+  margin:20px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🐺 人狼ゲーム</h1>
+
+<button onclick="connectJoy()">🎮 Joy-Con接続</button>
+<button onclick="giveRole()">🎲 役職配布</button>
+
+<p id="msg">接続してください</p>
+
+<script>
+
+let device = null
+
+// ===== Joy-Con接続（WebHID） =====
+async function connectJoy(){
+
+  device = await navigator.hid.requestDevice({
+    filters:[{vendorId:0x057e}] // Nintendo
+  })
+
+  device = device[0]
+  await device.open()
+
+  msg.innerText = "接続完了！"
+}
+
+
+// ===== 1回振動 =====
+async function rumble(){
+
+  if(!device) return
+
+  const data = new Uint8Array([
+    0x10,0x01,0x40,0x40,0x00,0x01,0x40,0x40
+  ])
+
+  await device.sendReport(0x10, data)
+}
+
+
+// ===== 複数回振動 =====
+async function vibrate(times){
+
+  for(let i=0;i<times;i++){
+    await rumble()
+    await new Promise(r=>setTimeout(r,250))
+  }
+}
+
+
+// ===== 役職配布 =====
+function giveRole(){
+
+  const role = Math.floor(Math.random()*5)+1
+
+  vibrate(role)
+
+  msg.innerText = "振動回数で確認！"
+}
+
+</script>
+</body>
+</html>
